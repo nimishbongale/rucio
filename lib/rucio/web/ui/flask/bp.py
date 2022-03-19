@@ -18,7 +18,7 @@
 # - Thomas Beermann <thomas.beermann@cern.ch>, 2020
 # - Benedikt Ziemons <benedikt.ziemons@cern.ch>, 2021
 
-from flask import Blueprint, request, render_template, make_response
+from flask import Blueprint, request, render_template, make_response, session
 
 from rucio.api.authentication import get_auth_token_x509
 from rucio.common.config import config_get, config_get_bool
@@ -32,7 +32,7 @@ OTHER_URLS = ()
 
 
 def auth():
-    auth_type = request.cookies.get('x-rucio-auth-type')
+    auth_type = session.get('x-rucio-auth-type')
     if str(auth_type).lower() == 'x509':
         token = get_token(get_auth_token_x509)
         if token:
@@ -51,7 +51,9 @@ def login():
     if request.method == 'GET':
         account = request.args.get('account')
         vo = request.args.get('vo')
-        return render_template('login.html', account=account, vo=vo)
+        session['account'] = account
+        session['vo'] = vo
+        return render_template('login.html')
     if request.method == 'POST':
         return userpass_auth()
 
@@ -70,7 +72,7 @@ def oidc():
 
 
 def oidc_final():
-    session_token = request.cookies.get('x-rucio-auth-token')
+    session_token = session.get('x-rucio-auth-token')
     return finalize_auth(session_token, 'OIDC')
 
 

@@ -27,7 +27,7 @@ from json import dumps, load
 from os.path import dirname, join
 from time import time
 
-from flask import request, render_template, redirect, make_response
+from flask import request, render_template, redirect, make_response, session
 from six.moves.urllib.parse import quote, unquote
 
 from rucio.api import authentication as auth, identity
@@ -119,22 +119,22 @@ def prepare_saml_request(environ, data):
     return None
 
 
-def add_cookies(response, cookie={}):
-    for int_cookie in cookie:
-        response.set_cookie(**int_cookie)
+def add_session_entries(response, session_entries=[]):
+    for entry in session_entries:
+        session[entry['key']] = entry['value'] 
 
     return(response)
 
 
-def redirect_to_last_known_url(cookie):
+def redirect_to_last_known_url(session_entries):
     """
-    Checks if there is preferred path in cookie and redirects to it.
+    Checks if there is preferred path in session and redirects to it.
     :returns: redirect to last known path
     """
-    requested_path = request.cookies.get('rucio-requested-path')
+    requested_path = session.get('rucio-requested-path')
     if not requested_path:
         requested_path = request.environ.get('REQUEST_URI')
-    resp = add_cookies(make_response(redirect(requested_path, code=303)), cookie)
+    resp = add_session_entries(make_response(redirect(requested_path, code=303)), session_entries)
 
     return resp
 
@@ -183,7 +183,7 @@ def select_account_name(identitystr, identity_type, vo=None):
             if account_info.account_type == AccountType.USER:
                 def_account = account
                 break
-        selected_account = request.cookies.get('rucio-selected-account')
+        selected_account = session.get('rucio-selected-account')
         if (selected_account):
             def_account = selected_account
         ui_account = def_account
@@ -219,15 +219,15 @@ def get_token(token_method, acc=None, vo=None, idt=None, pwd=None):
         return None
 
 
-def validate_webui_token(from_cookie=True, session_token=None):
+def validate_webui_token(from_session=True, session_token=None):
     """
     Validates token and returns token validation dictionary.
-    :param from_cookie: Token is looked up in cookies if True, otherwise session_token must be provided
+    :param from_session: Token is looked up in sessions if True, otherwise session_token must be provided
     :param session_token:  token string
     :returns: None or token validation dictionary
     """
-    if from_cookie:
-        session_token = request.cookies.get('x-rucio-auth-token')
+    if from_session:
+        session_token = session.get('x-rucio-auth-token')
     if session_token:
         session_token = unquote(session_token)
     valid_token_dict = auth.validate_auth_token(session_token)
@@ -249,17 +249,17 @@ def access_granted(valid_token_dict, template, title):
     return render_template(template, token=valid_token_dict['token'], account=valid_token_dict['account'], vo=valid_token_dict['vo'], policy=policy, title=title)
 
 
-def finalize_auth(token, identity_type, cookie_dict_extra=None):
+def finalize_auth(token, identity_type, session_dict_extra=None):
     """
-    Finalises login. Validates provided token, sets cookies
+    Finalises login. Validates provided token, sets session
     and redirects to the final page.
     :param token: token string
     :param identity_type:  identity_type e.g. x509, userpass, oidc, saml
-    :param cookie_dict_extra: extra cookies to set, dictionary expected
+    :param session_dict_extra: extra session_entries to set, dictionary expected
     :returns: redirects to the final page or renders a page with an error message.
     """
-    cookie = []
-    valid_token_dict = validate_webui_token(from_cookie=False, session_token=token)
+    session_entries = []
+    valid_token_dict = validate_webui_token(from_session=False, session_token=token)
     if not valid_token_dict:
         return render_template("problem.html", msg="It was not possible to validate and finalize your login with the provided token.")
     try:
@@ -270,7 +270,7 @@ def finalize_auth(token, identity_type, cookie_dict_extra=None):
             accvalues += acc + " "
         accounts = accvalues[:-1]
 
-        cookie.extend([{'key': 'x-rucio-auth-token', 'value': quote(token)},
+        session_entries.extend([{'key': 'x-rucio-auth-token', 'value': quote(token)},
                        {'key': 'x-rucio-auth-type', 'value': quote(identity_type)},
                        {'key': 'rucio-auth-token-created-at', 'value': str(long(time()))},
                        {'key': 'rucio-available-accounts', 'value': quote(accounts)},
@@ -278,10 +278,10 @@ def finalize_auth(token, identity_type, cookie_dict_extra=None):
                        {'key': 'rucio-selected-account', 'value': quote(valid_token_dict['account'])},
                        {'key': 'rucio-selected-vo', 'value': quote(valid_token_dict['vo'])}])
 
-        if cookie_dict_extra:
-            for key, value in cookie_dict_extra.items():
-                cookie.append({'key': key, 'value': value})
-        return redirect_to_last_known_url(cookie)
+        if session_dict_extra:
+            for key, value in session_dict_extra.items():
+                session_entries.append({'key': key, 'value': value})
+        return redirect_to_last_known_url(session_entries)
     except Exception:
         return render_template("problem.html", msg="It was not possible to validate and finalize your login with the provided token.")
 
@@ -346,10 +346,10 @@ def x509token_auth(data=None):
                 ui_vo = valid_vos[0]
             else:
                 vos_with_desc = get_vo_descriptions(valid_vos)
-                return add_cookies(make_response(render_template("select_login_method.html", oidc_issuers=AUTH_ISSUERS, saml_support=SAML_SUPPORT, possible_vos=vos_with_desc)))
+                return add_session_entries(make_response(render_template("select_login_method.html", oidc_issuers=AUTH_ISSUERS, saml_support=SAML_SUPPORT, possible_vos=vos_with_desc)))
         else:
             vos_with_desc = get_vo_descriptions(ui_vo)
-            return add_cookies(make_response(render_template("select_login_method.html", oidc_issuers=AUTH_ISSUERS, saml_support=SAML_SUPPORT, possible_vos=vos_with_desc)))
+            return add_session_entries(make_response(render_template("select_login_method.html", oidc_issuers=AUTH_ISSUERS, saml_support=SAML_SUPPORT, possible_vos=vos_with_desc)))
 
     if not ui_account:
         if MULTI_VO:
@@ -382,6 +382,10 @@ def userpass_auth():
     ui_vo = request.args.get('vo')
     username = request.form.get('username')
     password = request.form.get('password')
+
+    session['account'] = ui_account
+    session['vo'] = ui_vo
+    session['username'] = username
 
     if not username and not password:
         return render_template('problem.html', msg="No input credentials were provided.")
@@ -440,7 +444,7 @@ def saml_auth(method, data=None):
     SAML_PATH = join(dirname(__file__), 'saml/')
     req = prepare_saml_request(request.environ, data)
     samlauth = OneLogin_Saml2_Auth(req, custom_base_path=SAML_PATH)
-    saml_user_data = request.cookies.get('saml-user-data')
+    saml_user_data = session.get('saml-user-data')
     if not MULTI_VO:
         ui_vo = 'def'
     elif hasattr(data, 'vo') and data.vo:
@@ -457,7 +461,7 @@ def saml_auth(method, data=None):
         if not saml_user_data:
             return redirect(samlauth.login(), code=303)
         # If user data is present but token is not valid, create a new one
-        saml_nameid = request.cookies.get('saml-nameid')
+        saml_nameid = session.get('saml-nameid')
         if ui_account is None and ui_vo is None:
             ui_account, ui_vo = select_account_name(saml_nameid, 'saml', ui_vo)
         elif ui_account is None:
@@ -478,10 +482,10 @@ def saml_auth(method, data=None):
                     ui_vo = valid_vos[0]
                 else:
                     vos_with_desc = get_vo_descriptions(valid_vos)
-                    return add_cookies(make_response(render_template("select_login_method.html", oidc_issuers=AUTH_ISSUERS, saml_support=SAML_SUPPORT, possible_vos=vos_with_desc)))
+                    return add_session_entries(make_response(render_template("select_login_method.html", oidc_issuers=AUTH_ISSUERS, saml_support=SAML_SUPPORT, possible_vos=vos_with_desc)))
             else:
                 vos_with_desc = get_vo_descriptions(ui_vo)
-                return add_cookies(make_response(render_template("select_login_method.html", oidc_issuers=AUTH_ISSUERS, saml_support=SAML_SUPPORT, possible_vos=vos_with_desc)))
+                return add_session_entries(make_response(render_template("select_login_method.html", oidc_issuers=AUTH_ISSUERS, saml_support=SAML_SUPPORT, possible_vos=vos_with_desc)))
 
         if not ui_account:
             if MULTI_VO:
@@ -502,11 +506,12 @@ def saml_auth(method, data=None):
     if not errors:
         if samlauth.is_authenticated():
             saml_nameid = samlauth.get_nameid()
-            cookie_extra = {'saml-nameid': saml_nameid}
-            cookie_extra['saml-user-data'] = samlauth.get_attributes()
-            cookie_extra['saml-session-index'] = samlauth.get_session_index()
+            session_extra = {}
+            session_extra['saml-nameid'] = saml_nameid
+            session_extra['saml-user-data'] = samlauth.get_attributes()
+            session_extra['saml-session-index'] = samlauth.get_session_index()
             # WHY THIS ATTEMPTS TO GET A NEW TOKEN ?
-            # WE SHOULD HAVE IT/GET IT FROM COOKIE OR DB AND JUST REDIRECT, NO ?
+            # WE SHOULD HAVE IT/GET IT FROM SESSION OR DB AND JUST REDIRECT, NO ?
             if ui_account is None and ui_vo is None:
                 ui_account, ui_vo = select_account_name(saml_nameid, 'saml', ui_vo)
             elif ui_account is None:
@@ -527,10 +532,10 @@ def saml_auth(method, data=None):
                         ui_vo = valid_vos[0]
                     else:
                         vos_with_desc = get_vo_descriptions(valid_vos)
-                        return add_cookies(make_response(render_template("select_login_method.html", oidc_issuers=AUTH_ISSUERS, saml_support=SAML_SUPPORT, possible_vos=vos_with_desc)))
+                        return add_session_entries(make_response(render_template("select_login_method.html", oidc_issuers=AUTH_ISSUERS, saml_support=SAML_SUPPORT, possible_vos=vos_with_desc)))
                 else:
                     vos_with_desc = get_vo_descriptions(ui_vo)
-                    return add_cookies(make_response(render_template("select_login_method.html", oidc_issuers=AUTH_ISSUERS, saml_support=SAML_SUPPORT, possible_vos=vos_with_desc)))
+                    return add_session_entries(make_response(render_template("select_login_method.html", oidc_issuers=AUTH_ISSUERS, saml_support=SAML_SUPPORT, possible_vos=vos_with_desc)))
 
             if not ui_account:
                 if MULTI_VO:
@@ -543,7 +548,7 @@ def saml_auth(method, data=None):
                     return render_template("problem.html", msg=('Cannot get auth token. It is possible that the presented identity %s is not mapped to any Rucio account %s at VO %s.') % (html_escape(saml_nameid), html_escape(ui_account), html_escape(ui_vo)))
                 else:
                     return render_template("problem.html", msg=('Cannot get auth token. It is possible that the presented identity %s is not mapped to any Rucio account %s.') % (html_escape(saml_nameid), html_escape(ui_account)))
-            return finalize_auth(token, 'saml', cookie_extra)
+            return finalize_auth(token, 'saml', session_extra)
 
         return render_template("problem.html", msg="Not authenticated")
 
@@ -573,7 +578,7 @@ def oidc_auth(account, issuer, ui_vo=None):
             ui_vo = valid_vos[0]
         else:
             vos_with_desc = get_vo_descriptions(valid_vos)
-            return add_cookies(make_response(render_template("select_login_method.html", oidc_issuers=AUTH_ISSUERS, saml_support=SAML_SUPPORT, possible_vos=vos_with_desc)))
+            return add_session_entries(make_response(render_template("select_login_method.html", oidc_issuers=AUTH_ISSUERS, saml_support=SAML_SUPPORT, possible_vos=vos_with_desc)))
 
     if not issuer:
         return render_template("problem.html", msg="Please provide IdP issuer.")
@@ -602,16 +607,16 @@ def authenticate(template, title):
     :returns: rendered final page or a page with error message
     """
     global AUTH_ISSUERS, SAML_SUPPORT, AUTH_TYPE
-    cookie = []
+    session_entries = []
     valid_token_dict = validate_webui_token()
     if not valid_token_dict:
-        cookie.append({'key': 'rucio-requested-path', 'value': request.environ.get('REQUEST_URI')})
+        session_entries.append({'key': 'rucio-requested-path', 'value': request.environ.get('REQUEST_URI')})
     else:
         return access_granted(valid_token_dict, template, title)
 
     # login without any known server config
     if not AUTH_TYPE:
-        return add_cookies(make_response(render_template("select_login_method.html", oidc_issuers=AUTH_ISSUERS, saml_support=SAML_SUPPORT)), cookie)
+        return add_session_entries(make_response(render_template("select_login_method.html", oidc_issuers=AUTH_ISSUERS, saml_support=SAML_SUPPORT)), session)
     # for AUTH_TYPE predefined by the server continue
     else:
         if AUTH_TYPE == 'userpass':

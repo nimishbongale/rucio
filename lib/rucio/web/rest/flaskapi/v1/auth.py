@@ -31,7 +31,7 @@ import time
 from re import search
 from typing import TYPE_CHECKING
 
-from flask import Flask, Blueprint, request, Response, redirect, render_template
+from flask import Flask, Blueprint, request, Response, redirect, render_template, session
 from six.moves.urllib.parse import urlparse
 from werkzeug.datastructures import Headers
 
@@ -418,8 +418,9 @@ class TokenOIDC(ErrorHandlingMethodView):
             domain = '.'.join(urlparse(webhome).netloc.split('.')[1:])
             response = redirect(webhome, code=303)
             response.headers.extend(headers)
-            response.set_cookie('x-rucio-auth-token', value=result['token']['token'], domain=domain, path='/')
-            response.set_cookie('rucio-auth-token-created-at', value=str(time.time()), domain=domain, path='/')
+            # TODO: domain=domain & path ='/'
+            session['x-rucio-auth-token'] = result['token']['token']
+            session['rucio-auth-token-created-at'] = str(time.time())
             return response
         else:
             return '', 400, headers
@@ -879,7 +880,7 @@ class SAML(ErrorHandlingMethodView):
         if not EXTRA_MODULES['onelogin']:
             return "SAML not configured on the server side.", 400, headers
 
-        saml_nameid = request.cookies.get('saml-nameid', default=None)
+        saml_nameid = session.get('saml-nameid')
         vo = extract_vo(request.headers)
         account = request.headers.get('X-Rucio-Account', default=None)
         appid = request.headers.get('X-Rucio-AppID', default='unknown')
@@ -935,7 +936,7 @@ class SAML(ErrorHandlingMethodView):
         if not errors:
             if auth.is_authenticated():
                 response = Response()
-                response.set_cookie('saml-nameid', value=auth.get_nameid(), path='/')
+                session['saml-nameid'] = auth.get_nameid()
                 return response
         return '', 200
 

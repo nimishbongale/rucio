@@ -86,7 +86,7 @@
           {% if account %}
           <div class="row">
             <div class="large-6 columns center">
-              <label>Rucio account name: {{ account }}</label>
+              <label>Rucio account name: {{ session['account'] }}</label>
               <input type="hidden" name="account" value=$account id="account"/>
             </div>
           </div>

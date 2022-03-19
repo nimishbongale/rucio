@@ -27,6 +27,8 @@ from rucio.web.ui.flask import bp
 setup_logging()
 application = Flask(__name__)
 
+# ideally something complex
+application.secret_key = "rucio_web_ui"
 application.register_blueprint(bp.blueprint())
 
 
